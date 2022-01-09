@@ -1,56 +1,170 @@
-// #include "stdafx.h"
 #include <stdio.h>
 #include <Windows.h>
-#include "aacenc_lib.h"
+#include <mmsystem.h> //导入声音头文件
+#include "aacenc.h"
 #include "srs_librtmp.h"
 
-#pragma comment(lib, "winmm.lib")
+using namespace std;
 
-HWAVEIN hWaveIn;       //输入设备
-WAVEFORMATEX waveform; //采集音频的格式，结构体
-BYTE *pBuffer1;        //采集音频时的数据缓存
-WAVEHDR wHdr1;         //采集音频时包含数据缓存的结构体
-FILE *pf;
+#define MAX_INQUEU 2
+#define BUFSIZE 2048
 
-int main(int argc, char ** argv)
+static srs_rtmp_t rtmp;
+HWAVEIN hWaveIn;    //输入设备
+static HWAVEIN hwi; // handle指向音频输入
+static WAVEFORMATEX waveformat;
+static WAVEHDR *pwhi, whis[MAX_INQUEU];
+static char waveBufferRecord[MAX_INQUEU][BUFSIZE];
+static int bufflag = 0; //标记读取哪个缓冲区
+
+int init_rtmp(void)
 {
-    HANDLE wait;
-    waveform.wFormatTag = WAVE_FORMAT_PCM; //声音格式为PCM
-    waveform.nSamplesPerSec = 8000;        //采样率，16000次/秒
-    waveform.wBitsPerSample = 16;          //采样比特，16bits/次
-    waveform.nChannels = 1;                //采样声道数，2声道
-    waveform.nAvgBytesPerSec = 16000;      //每秒的数据率，就是每秒能采集多少字节的数据
-    waveform.nBlockAlign = 2;              //一个块的大小，采样bit的字节数乘以声道数
-    waveform.cbSize = 0;                   //一般为0
+    printf("Example for srs-librtmp\n");
+    printf("SRS(ossrs) client librtmp library.\n");
+    printf("version: %d.%d.%d\n", srs_version_major(), srs_version_minor(), srs_version_revision());
 
-    wait = CreateEvent(NULL, 0, 0, NULL);
-    //使用waveInOpen函数开启音频采集
-    waveInOpen(&hWaveIn, WAVE_MAPPER, &waveform, (DWORD_PTR)wait, 0L, CALLBACK_EVENT);
+    rtmp = srs_rtmp_create("rtmp://127.0.0.1:1935/live/aac");
 
-    //建立两个数组（这里可以建立多个数组）用来缓冲音频数据
-    DWORD bufsize = 1024 * 100; //每次开辟10k的缓存存储录音数据
-    int i = 20;
-    fopen_s(&pf, "录音测试.pcm", "wb");
-    while (i--) //录制20左右秒声音，结合音频解码和网络传输可以修改为实时录音播放的机制以实现对讲功能
+    if (srs_rtmp_handshake(rtmp) != 0)
     {
-        pBuffer1 = new BYTE[bufsize];
-        wHdr1.lpData = (LPSTR)pBuffer1;
-        wHdr1.dwBufferLength = bufsize;
-        wHdr1.dwBytesRecorded = 0;
-        wHdr1.dwUser = 0;
-        wHdr1.dwFlags = 0;
-        wHdr1.dwLoops = 1;
-        waveInPrepareHeader(hWaveIn, &wHdr1, sizeof(WAVEHDR)); //准备一个波形数据块头用于录音
-        waveInAddBuffer(hWaveIn, &wHdr1, sizeof(WAVEHDR));     //指定波形数据块为录音输入缓存
-        waveInStart(hWaveIn);                                  //开始录音
-        Sleep(1000);                                           //等待声音录制1s
-        waveInReset(hWaveIn);                                  //停止录音
-        fwrite(pBuffer1, 1, wHdr1.dwBytesRecorded, pf);
-        delete pBuffer1;
-        printf("%ds  ", i);
+        srs_human_trace("simple handshake failed.");
+        goto rtmp_destroy;
     }
-    fclose(pf);
+    srs_human_trace("simple handshake success");
 
-    waveInClose(hWaveIn);
+    if (srs_rtmp_connect_app(rtmp) != 0)
+    {
+        srs_human_trace("connect vhost/app failed.");
+        goto rtmp_destroy;
+    }
+    srs_human_trace("connect vhost/app success");
+
+    if (srs_rtmp_publish_stream(rtmp) != 0)
+    {
+        srs_human_trace("publish stream failed.");
+        goto rtmp_destroy;
+    }
+    srs_human_trace("publish stream success");
+
+    return 0;
+
+rtmp_destroy:
+    srs_rtmp_destroy(rtmp);
+
+    return 0;
+}
+
+void CALLBACK waveInProc(
+    HWAVEIN hwi,
+    UINT uMsg,
+    DWORD_PTR dwInstance,
+    DWORD_PTR dwParam1,
+    DWORD_PTR dwParam2)
+{
+    LPWAVEHDR pwh = (LPWAVEHDR)dwParam1;
+    if (uMsg == MM_WIM_DATA)
+    {
+        pwhi = &whis[bufflag];
+        waveInUnprepareHeader(hwi, pwhi, sizeof(WAVEHDR));
+        pwhi = &whis[MAX_INQUEU - 1 - bufflag];
+        pwhi->dwFlags = 0;
+        pwhi->dwLoops = 0;
+        waveInPrepareHeader(hwi, pwhi, sizeof(WAVEHDR));
+        waveInAddBuffer(hwi, pwhi, sizeof(WAVEHDR));
+        static unsigned char prevBuf[BUFSIZE];
+        memcpy(prevBuf, waveBufferRecord[bufflag], BUFSIZE);
+        bufflag = (bufflag + 1) % MAX_INQUEU;
+
+        // 调用pcm2aac 返回数据
+        // 数组大小设置，动态或者静态
+        uint8_t aac_data[20480];
+
+        int output_buf_len = accenc_pcm2acc(prevBuf, aac_data, BUFSIZE);
+
+        // 调用推流函数
+        char sound_format = 10;
+        char sound_rate = 3;
+        char sound_size = 1;
+        char sound_type = 0;
+        // 时间戳如何获取
+        u_int32_t timestamp = (u_int32_t)(clock() / CLOCKS_PER_SEC);
+
+        int ret = 0;
+        if ((ret = srs_audio_write_raw_frame(rtmp,
+                                             sound_format,
+                                             sound_rate,
+                                             sound_size,
+                                             sound_type,
+                                             (char *)aac_data,
+                                             output_buf_len,
+                                             timestamp)) != 0)
+        {
+            srs_human_trace("send audio raw data failed. ret=%d", ret);
+            srs_rtmp_destroy(rtmp);
+        }
+
+        srs_human_trace("sent packet: type=%s, time=%d, size=%d, codec=%d, rate=%d, sample=%d, channel=%d",
+                        srs_human_flv_tag_type2string(SRS_RTMP_TYPE_AUDIO),
+                        timestamp,
+                        output_buf_len,
+                        sound_format,
+                        sound_rate,
+                        sound_size,
+                        sound_type);
+    }
+}
+
+void StartRecord(void)
+{
+    memset(&waveformat, 0, sizeof(WAVEFORMATEX));
+    waveformat.wFormatTag = WAVE_FORMAT_PCM;
+    waveformat.nChannels = 1;
+    waveformat.wBitsPerSample = 16;
+    waveformat.nSamplesPerSec = 44100L;
+    waveformat.nBlockAlign = 2;
+    waveformat.nAvgBytesPerSec = 88200L;
+    waveformat.cbSize = 0;
+    waveInOpen(&hwi, WAVE_MAPPER, &waveformat, (DWORD_PTR)waveInProc, (DWORD_PTR)NULL, CALLBACK_FUNCTION);
+    for (int k = 0; k < MAX_INQUEU; k++)
+    {
+        pwhi = &whis[k];
+        pwhi->dwFlags = 0;
+        pwhi->dwLoops = 0;
+        pwhi->dwBytesRecorded = 0;
+        pwhi->dwBufferLength = BUFSIZE;
+        pwhi->lpData = waveBufferRecord[k];
+    }
+    for (int k = 0; k < (MAX_INQUEU - 1); k++)
+    {
+        pwhi = &whis[k];
+        waveInPrepareHeader(hwi, pwhi, sizeof(WAVEHDR));
+        waveInAddBuffer(hwi, pwhi, sizeof(WAVEHDR));
+    }
+    if (waveInStart(hwi) != MMSYSERR_NOERROR)
+    {
+        printf("waveInStart error");
+    }
+}
+
+void StopRecord(void)
+{
+    waveInStop(hwi);
+}
+
+int main(int argc, char *argv[])
+{
+    printf("start...\n");
+
+    init_rtmp();
+    accenc_init();
+    StartRecord();
+
+    while (1)
+    {
+        Sleep(1000);
+    }
+
+    StopRecord();
+
     return 0;
 }

@@ -457,7 +457,7 @@ endif()
 ## Create Library target. Actually fdk-aac is enough, but we also create
 ## FDK-AAC::fdk-aac for consistence with config-file package.
 
-add_library(fdk-aac ${libfdk_aac_SOURCES})
+add_library(fdk-aac STATIC ${libfdk_aac_SOURCES})
 add_library(FDK-AAC::fdk-aac ALIAS fdk-aac)
 
 ## Library target configuration
