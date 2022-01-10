@@ -23,7 +23,7 @@ int init_rtmp(void)
     printf("SRS(ossrs) client librtmp library.\n");
     printf("version: %d.%d.%d\n", srs_version_major(), srs_version_minor(), srs_version_revision());
 
-    rtmp = srs_rtmp_create("rtmp://127.0.0.1:1935/live/aac");
+    rtmp = srs_rtmp_create("rtmp://47.241.234.247:1935/live/aac");
 
     if (srs_rtmp_handshake(rtmp) != 0)
     {
@@ -87,7 +87,7 @@ void CALLBACK waveInProc(
         char sound_size = 1;
         char sound_type = 0;
         // 时间戳如何获取
-        u_int32_t timestamp = (u_int32_t)(clock() / CLOCKS_PER_SEC);
+        u_int32_t timestamp = (u_int32_t)clock();
 
         int ret = 0;
         if ((ret = srs_audio_write_raw_frame(rtmp,
