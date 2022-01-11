@@ -27,8 +27,8 @@ int init_rtmp(void)
     printf("SRS(ossrs) client librtmp library.\n");
     printf("version: %d.%d.%d\n", srs_version_major(), srs_version_minor(), srs_version_revision());
 
-    // rtmp = srs_rtmp_create("rtmp://47.241.234.247:1935/live/aac");
-    rtmp = srs_rtmp_create("rtmp://127.0.0.1:1935/live/test");
+    rtmp = srs_rtmp_create("rtmp://47.241.234.247:1935/live/test");
+    // rtmp = srs_rtmp_create("rtmp://127.0.0.1:1935/live/test");
 
     if (srs_rtmp_handshake(rtmp) != 0)
     {
@@ -69,65 +69,68 @@ void CALLBACK waveInProc(
     LPWAVEHDR pwh = (LPWAVEHDR)dwParam1;
     if (uMsg == MM_WIM_DATA)
     {
-        pwhi = &whis[bufflag];
-        waveInUnprepareHeader(hwi, pwhi, sizeof(WAVEHDR));
-        pwhi = &whis[MAX_INQUEU - 1 - bufflag];
-        pwhi->dwFlags = 0;
-        pwhi->dwLoops = 0;
-        waveInPrepareHeader(hwi, pwhi, sizeof(WAVEHDR));
-        waveInAddBuffer(hwi, pwhi, sizeof(WAVEHDR));
-        static unsigned char prevBuf[BUFSIZE];
-        memcpy(prevBuf, waveBufferRecord[bufflag], BUFSIZE);
-        bufflag = (bufflag + 1) % MAX_INQUEU;
+        // waveInUnprepareHeader(hwi, pwh, sizeof(WAVEHDR));
 
-        wave_size += pwh->dwBytesRecorded;
-        wave_buff = (BYTE *)realloc(wave_buff, wave_size * sizeof(BYTE));
+        // static unsigned char prevBuf[BUFSIZE];
+        // memcpy(prevBuf, pwh->lpData, pwh->dwBytesRecorded);
+        // bufflag = (bufflag + 1) % MAX_INQUEU;
 
-        if (wave_buff)
+
+        if (1)
         {
-            memcpy(wave_buff + wave_size - pwh->dwBytesRecorded, prevBuf, pwh->dwBytesRecorded);
+            // 调用pcm2aac 返回数据
+            // 数组大小设置，动态或者静态
+            BYTE aac_data[20480];
+            int output_buf_len = accenc_pcm2acc((uint8_t *)pwh->lpData, aac_data, BUFSIZE);
+
+            wave_size += output_buf_len;
+            wave_buff = (BYTE *)realloc(wave_buff, wave_size * sizeof(BYTE));
+
+            if (wave_buff)
+            {
+                memcpy(wave_buff + wave_size - output_buf_len, aac_data, output_buf_len);
+            }
+            else
+            {
+                printf("error\n");
+            }
+
+
+            // 调用推流函数
+            char sound_format = 10;
+            char sound_rate = 3;
+            char sound_size = 1;
+            char sound_type = 0;
+            // 时间戳如何获取
+            // u_int32_t timestamp += (u_int32_t)clock();
+            timestamp += 23;
+
+            int ret = 0;
+            if ((ret = srs_audio_write_raw_frame(rtmp,
+                                                 sound_format,
+                                                 sound_rate,
+                                                 sound_size,
+                                                 sound_type,
+                                                 (char *)aac_data,
+                                                 output_buf_len,
+                                                 timestamp)) != 0)
+            {
+                srs_human_trace("send audio raw data failed. ret=%d", ret);
+                srs_rtmp_destroy(rtmp);
+            }
+
+            srs_human_trace("sent packet: type=%s, time=%d, size=%d, codec=%d, rate=%d, sample=%d, channel=%d",
+                            srs_human_flv_tag_type2string(SRS_RTMP_TYPE_AUDIO),
+                            timestamp,
+                            output_buf_len,
+                            sound_format,
+                            sound_rate,
+                            sound_size,
+                            sound_type);
         }
-        else
-        {
-            printf("error\n");
-        }
 
-        // 调用pcm2aac 返回数据
-        // 数组大小设置，动态或者静态
-        BYTE aac_data[20480];
-        int output_buf_len = accenc_pcm2acc(prevBuf, aac_data, pwh->dwBytesRecorded);
-
-        // 调用推流函数
-        char sound_format = 10;
-        char sound_rate = 3;
-        char sound_size = 1;
-        char sound_type = 0;
-        // 时间戳如何获取
-        // u_int32_t timestamp += (u_int32_t)clock();
-        timestamp += 45;
-
-        int ret = 0;
-        if ((ret = srs_audio_write_raw_frame(rtmp,
-                                             sound_format,
-                                             sound_rate,
-                                             sound_size,
-                                             sound_type,
-                                             (char *)aac_data,
-                                             output_buf_len,
-                                             timestamp)) != 0)
-        {
-            srs_human_trace("send audio raw data failed. ret=%d", ret);
-            srs_rtmp_destroy(rtmp);
-        }
-
-        // srs_human_trace("sent packet: type=%s, time=%d, size=%d, codec=%d, rate=%d, sample=%d, channel=%d",
-        //                 srs_human_flv_tag_type2string(SRS_RTMP_TYPE_AUDIO),
-        //                 timestamp,
-        //                 output_buf_len,
-        //                 sound_format,
-        //                 sound_rate,
-        //                 sound_size,
-        //                 sound_type);
+        // waveInPrepareHeader(hwi, pwh, sizeof(WAVEHDR));
+        waveInAddBuffer(hwi, pwh, sizeof(WAVEHDR));
     }
 }
 
@@ -146,14 +149,11 @@ void StartRecord(void)
     {
         pwhi = &whis[k];
         pwhi->dwFlags = 0;
-        pwhi->dwLoops = 0;
+        pwhi->dwUser = 0;
+        pwhi->dwLoops = 1;
         pwhi->dwBytesRecorded = 0;
         pwhi->dwBufferLength = BUFSIZE;
         pwhi->lpData = waveBufferRecord[k];
-    }
-    for (int k = 0; k < (MAX_INQUEU - 1); k++)
-    {
-        pwhi = &whis[k];
         waveInPrepareHeader(hwi, pwhi, sizeof(WAVEHDR));
         waveInAddBuffer(hwi, pwhi, sizeof(WAVEHDR));
     }

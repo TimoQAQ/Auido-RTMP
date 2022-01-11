@@ -95,7 +95,7 @@ int pcm2wave(char *pcm_buf, int raw_sz, const char * filename)
 		/* code */
 	}
 	
-	fwrite(&wheader, 1, sizeof(wheader), fwav);
+	// fwrite(&wheader, 1, sizeof(wheader), fwav);
 	fwrite(pcm_buf, 1, raw_sz, fwav);
 	fclose(fwav);
 	

@@ -130,7 +130,7 @@ int accenc_pcm2acc(uint8_t *input_buf, uint8_t *output_buf, int input_size)
     {
         if (err == AACENC_ENCODE_EOF)
         {
-            fprintf(stderr, "end of buffer: 0x%x\n", err);
+            fprintf(stderr, "end of buffer: 0x%x size:%d\n", err, input_size);
             return 0;
         }
 
