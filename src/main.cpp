@@ -3,6 +3,7 @@
 #include <mmsystem.h> //导入声音头文件
 #include "aacenc.h"
 #include "srs_librtmp.h"
+#include "pcm2wave.h"
 
 using namespace std;
 
@@ -16,6 +17,9 @@ static WAVEFORMATEX waveformat;
 static WAVEHDR *pwhi, whis[MAX_INQUEU];
 static char waveBufferRecord[MAX_INQUEU][BUFSIZE];
 static int bufflag = 0; //标记读取哪个缓冲区
+static u_int32_t timestamp = 0;
+static BYTE *wave_buff = NULL;
+static int wave_size = 0;
 
 int init_rtmp(void)
 {
@@ -23,7 +27,8 @@ int init_rtmp(void)
     printf("SRS(ossrs) client librtmp library.\n");
     printf("version: %d.%d.%d\n", srs_version_major(), srs_version_minor(), srs_version_revision());
 
-    rtmp = srs_rtmp_create("rtmp://47.241.234.247:1935/live/aac");
+    // rtmp = srs_rtmp_create("rtmp://47.241.234.247:1935/live/aac");
+    rtmp = srs_rtmp_create("rtmp://127.0.0.1:1935/live/test");
 
     if (srs_rtmp_handshake(rtmp) != 0)
     {
@@ -75,11 +80,22 @@ void CALLBACK waveInProc(
         memcpy(prevBuf, waveBufferRecord[bufflag], BUFSIZE);
         bufflag = (bufflag + 1) % MAX_INQUEU;
 
+        wave_size += pwh->dwBytesRecorded;
+        wave_buff = (BYTE *)realloc(wave_buff, wave_size * sizeof(BYTE));
+
+        if (wave_buff)
+        {
+            memcpy(wave_buff + wave_size - pwh->dwBytesRecorded, prevBuf, pwh->dwBytesRecorded);
+        }
+        else
+        {
+            printf("error\n");
+        }
+
         // 调用pcm2aac 返回数据
         // 数组大小设置，动态或者静态
-        uint8_t aac_data[20480];
-
-        int output_buf_len = accenc_pcm2acc(prevBuf, aac_data, BUFSIZE);
+        BYTE aac_data[20480];
+        int output_buf_len = accenc_pcm2acc(prevBuf, aac_data, pwh->dwBytesRecorded);
 
         // 调用推流函数
         char sound_format = 10;
@@ -87,7 +103,8 @@ void CALLBACK waveInProc(
         char sound_size = 1;
         char sound_type = 0;
         // 时间戳如何获取
-        u_int32_t timestamp = (u_int32_t)clock();
+        // u_int32_t timestamp += (u_int32_t)clock();
+        timestamp += 45;
 
         int ret = 0;
         if ((ret = srs_audio_write_raw_frame(rtmp,
@@ -103,14 +120,14 @@ void CALLBACK waveInProc(
             srs_rtmp_destroy(rtmp);
         }
 
-        srs_human_trace("sent packet: type=%s, time=%d, size=%d, codec=%d, rate=%d, sample=%d, channel=%d",
-                        srs_human_flv_tag_type2string(SRS_RTMP_TYPE_AUDIO),
-                        timestamp,
-                        output_buf_len,
-                        sound_format,
-                        sound_rate,
-                        sound_size,
-                        sound_type);
+        // srs_human_trace("sent packet: type=%s, time=%d, size=%d, codec=%d, rate=%d, sample=%d, channel=%d",
+        //                 srs_human_flv_tag_type2string(SRS_RTMP_TYPE_AUDIO),
+        //                 timestamp,
+        //                 output_buf_len,
+        //                 sound_format,
+        //                 sound_rate,
+        //                 sound_size,
+        //                 sound_type);
     }
 }
 
@@ -149,11 +166,14 @@ void StartRecord(void)
 void StopRecord(void)
 {
     waveInStop(hwi);
+    pcm2wave((char *)wave_buff, wave_size, "record.wav");
 }
 
 int main(int argc, char *argv[])
 {
     printf("start...\n");
+
+    wave_buff = (BYTE *)malloc(1);
 
     init_rtmp();
     accenc_init();
@@ -161,7 +181,11 @@ int main(int argc, char *argv[])
 
     while (1)
     {
-        Sleep(1000);
+        char c = getchar();
+        if (c == 0x61)
+            break;
+        else
+            Sleep(1000);
     }
 
     StopRecord();
