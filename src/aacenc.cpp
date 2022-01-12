@@ -1,16 +1,14 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include "aacenc_lib.h"
 
 int channels = 1;
 HANDLE_AACENCODER handle;
 AACENC_InfoStruct info = {0};
 
-int accenc_init(void)
+int aacenc_init(void)
 {
-
     int aot = 2;
     int vbr = 0;
     int eld_sbr = 0;
@@ -19,47 +17,47 @@ int accenc_init(void)
     CHANNEL_MODE mode = MODE_1;
     int sample_rate = 44100;
     int bits_per_sample = 16;
-    int bitrate = 128000;
+    int bitrate = 128000; // MAX: 705600
 
     if (aacEncOpen(&handle, 0, channels) != AACENC_OK)
     {
         fprintf(stderr, "Unable to open encoder\n");
-        return 1;
+        return -1;
     }
     if (aacEncoder_SetParam(handle, AACENC_AOT, aot) != AACENC_OK)
     {
         fprintf(stderr, "Unable to set the AOT\n");
-        return 1;
+        return -1;
     }
     if (aot == 39 && eld_sbr)
     {
         if (aacEncoder_SetParam(handle, AACENC_SBR_MODE, 1) != AACENC_OK)
         {
             fprintf(stderr, "Unable to set SBR mode for ELD\n");
-            return 1;
+            return -1;
         }
     }
     if (aacEncoder_SetParam(handle, AACENC_SAMPLERATE, sample_rate) != AACENC_OK)
     {
         fprintf(stderr, "Unable to set the sample rate\n");
-        return 1;
+        return -1;
     }
     if (aacEncoder_SetParam(handle, AACENC_CHANNELMODE, mode) != AACENC_OK)
     {
         fprintf(stderr, "Unable to set the channel mode\n");
-        return 1;
+        return -1;
     }
     if (aacEncoder_SetParam(handle, AACENC_CHANNELORDER, 1) != AACENC_OK)
     {
         fprintf(stderr, "Unable to set the wav channel order\n");
-        return 1;
+        return -1;
     }
     if (vbr)
     {
         if (aacEncoder_SetParam(handle, AACENC_BITRATEMODE, vbr) != AACENC_OK)
         {
             fprintf(stderr, "Unable to set the VBR bitrate mode\n");
-            return 1;
+            return -1;
         }
     }
     else
@@ -67,34 +65,45 @@ int accenc_init(void)
         if (aacEncoder_SetParam(handle, AACENC_BITRATE, bitrate) != AACENC_OK)
         {
             fprintf(stderr, "Unable to set the bitrate\n");
-            return 1;
+            return -1;
         }
     }
     if (aacEncoder_SetParam(handle, AACENC_TRANSMUX, TT_MP4_ADTS) != AACENC_OK)
     {
         fprintf(stderr, "Unable to set the ADTS transmux\n");
-        return 1;
+        return -1;
     }
     if (aacEncoder_SetParam(handle, AACENC_AFTERBURNER, afterburner) != AACENC_OK)
     {
         fprintf(stderr, "Unable to set the afterburner mode\n");
-        return 1;
+        return -1;
     }
     if (aacEncEncode(handle, NULL, NULL, NULL, NULL) != AACENC_OK)
     {
         fprintf(stderr, "Unable to initialize the encoder\n");
-        return 1;
+        return -1;
     }
     if (aacEncInfo(handle, &info) != AACENC_OK)
     {
         fprintf(stderr, "Unable to get the encoder info\n");
-        return 1;
+        return -1;
     }
 
     return 0;
 }
 
-int accenc_pcm2acc(uint8_t *input_buf, uint8_t *output_buf, int input_size)
+int aacenc_close(void)
+{
+    if (aacEncClose(&handle) != AACENC_OK)
+    {
+        fprintf(stderr, "Unable to close encoder\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+int aacenc_pcm2aac(uint8_t *input_buf, uint8_t *output_buf, int input_size)
 {
     AACENC_ERROR err;
     AACENC_BufDesc in_buf = {0}, out_buf = {0};
@@ -105,7 +114,7 @@ int accenc_pcm2acc(uint8_t *input_buf, uint8_t *output_buf, int input_size)
     int in_size, in_elem_size;
     int out_size, out_elem_size;
     void *in_ptr, *out_ptr;
-    uint8_t outbuf[20480];
+    uint8_t outbuf[1024 * 1];
 
     in_ptr = input_buf;
     in_size = input_size;
@@ -139,5 +148,6 @@ int accenc_pcm2acc(uint8_t *input_buf, uint8_t *output_buf, int input_size)
     }
 
     memcpy(output_buf, outbuf, out_args.numOutBytes);
+
     return out_args.numOutBytes;
 }
