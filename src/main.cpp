@@ -10,8 +10,8 @@ using namespace std;
 // #define SAVE2WAV
 #define MAX_INQUEU 2
 #define BUFSIZE 1024 * 2
-// #define RTMP_URL "rtmp://47.241.234.247:1935/live/aac"
-#define RTMP_URL "rtmp://127.0.0.1:1935/live/aac"
+#define RTMP_URL "rtmp://47.241.234.247:1935/live/aac"
+// #define RTMP_URL "rtmp://127.0.0.1:1935/live/aac"
 
 static HWAVEIN hwi;
 static WAVEFORMATEX waveformat;
